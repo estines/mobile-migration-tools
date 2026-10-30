@@ -26,9 +26,10 @@ mobile-migration-tools/
 │   └── AGENTS.md                                 # Always-on compiler & parity guardrails
 ├── scripts/
 │   ├── detect-project.sh                         # Auto-detects legacy languages, UI, build system, and modules
-│   ├── compile-gate.sh                           # Universal Always-Compile gate runner
+│   ├── compile-gate.sh                           # Universal Always-Compile & Anti-Slop gate runner
+│   ├── handoff-substep.sh                        # Verified sub-step handoff & Golden Master SHA-256 lock recorder
 │   ├── log-evidence.sh                           # Append-only TSV evidence logger (.mstack/audit.tsv)
-│   └── automate-plan.sh                          # Long-running non-interactive CLI automation loop
+│   └── automate-plan.sh                          # Sequential 1-sub-step-per-session non-interactive CLI runner
 └── skills/
     ├── mstack-mode/SKILL.md                      # Front-door orchestrator (like /poteto-mode)
     ├── mstack-setup/SKILL.md                     # Interactive project detector & target-stack selector
@@ -209,20 +210,31 @@ You can also ask the agent to orchestrate an entire feature migration from start
 
 ## Long-Running Non-Interactive CLI Automation (`mstack-automation`)
 
-### Why Skills Normally Stop After 1 Migration Step
-In standard interactive chat sessions, AI agents often stop after finishing **1 migration step** because of:
-1. **Single-Turn Checkpoint Bias**: Skills pause to report results or ask for human confirmation between phases.
-2. **Context Window Saturation**: Running 4 phases × 4 sub-steps across multiple features fills up a single conversation's context window with build logs and diffs, causing the model to wrap up early.
+### Why `mstack` Uses 1 Sub-Step per Session + Verified Handoff + Anti-Slop Locks
+In standard interactive chat sessions or coarse phase loops, AI agents fail in three predictable ways:
+1. **Single-Turn Checkpoint Bias**: Skills pause to report results or ask for human confirmation after 1 step.
+2. **Quadratic Context Bloat & Late-Session Fatigue**: Bundling 4 sub-steps (`1.1`–`1.4`) into a single session balloons the context window to 70k–100k tokens by turn 20, causing the agent to rush or stub Sub-Steps `.3` and `.4`.
+3. **Slop Loops**: Unattended agents sometimes overwrite Golden Master baselines created in `1.1`/`2.1` to fake a pass in `1.3`/`2.3`, add `@Ignore` to tests, or ping-pong between the same two compiler errors.
 
-`mstack` solves this with **`mstack-automation`** and `./mobile-migration-tools/scripts/automate-plan.sh` (`npx mobile-migration-tools automate`). It persists a multi-step queue in `.mstack/migration-plan.json` and loops through every `PENDING` step—invoking **any CLI tool in non-interactive headless mode** with a **fresh context window per step** and automatic self-healing retries until 100% of steps pass `compile-gate.sh`.
+`mstack` solves all three with **`mstack-automation`**, `./mobile-migration-tools/scripts/automate-plan.sh`, and `./mobile-migration-tools/scripts/handoff-substep.sh`:
+- **Sequential 1-Sub-Step-Per-Session Execution**: Expands every feature into atomic sub-steps (`1.1`, `1.2`, `1.3`, `1.4`, `2.1`, `2.2`, `2.3`, `2.4`, `3.1`, `3.2`, `3.3`, `3.4`) in `.mstack/migration-plan.json` and runs **1 fresh non-interactive CLI session per 1 sub-step** (~45% lower total token usage and ~95%+ sub-step goal accuracy).
+- **Verified Agent-to-Agent Handoffs (`handoff-substep.sh`)**: Every sub-step session records what it completed (`--summary`, fact-checked `--files` verified on disk, and `--lock-golden`). If a sub-step requires more work than fits in 1 session, the agent compiles its partial work and sets `--status NEEDS_MORE_WORK --remaining "todo1|todo2"` (or `--spawn-substep "<title>"`) so the next spawned session picks up the exact remaining items.
+- **5 Anti-Slop Circuit Breakers**:
+  1. **Golden Master SHA-256 Locks**: Baseline files locked in `1.1`/`2.1`/`3.1` cannot be modified or deleted by later sessions (`1.3`/`2.3`/`3.4`).
+  2. **Non-Empty Diff Check**: Rejects no-op sessions that exit without modifying files or recording a handoff.
+  3. **Bounded Continuations (`--max-continuations 3`)**: Prevents infinite `NEEDS_MORE_WORK` procrastination chains.
+  4. **Attempt History + Ping-Pong Circuit Breaker**: Injects all previous failed attempts into retry prompts and halts immediately if two consecutive attempts produce the identical error hash.
+  5. **Test Tampering & Boundary Guard**: Rejects `git diff` changes that add `@Ignore`/`@Disabled` or touch Legacy UI XML/Storyboards during Step 1.
 
 ```mermaid
 flowchart LR
-    Queue[".mstack/migration-plan.json\n(Step Queue)"] --> Runner["automate-plan.sh\n(While PENDING steps exist)"]
+    Queue[".mstack/migration-plan.json\n(Sub-Step Queue: 1.1..3.4)"] --> Runner["automate-plan.sh\n(1 Sub-Step per Session)"]
     Runner --> CLI["Non-Interactive CLI Agent\n(agy / claude / codex / gemini / aider / custom)"]
-    CLI --> Gate["compile-gate.sh\n(Verify Build & Parity)"]
-    Gate -- "PASS" --> Mark["Mark Step COMPLETED\n& Immediately Start Next Step"]
-    Gate -- "FAIL" --> Retry["Feed Error Tail to Next Retry\n(Up to --max-retries)"]
+    CLI --> Handoff["handoff-substep.sh\n(DONE or NEEDS_MORE_WORK\n+ Verified Files & Golden Locks)"]
+    Handoff --> Gate["compile-gate.sh\n(Compile + Tests + Anti-Slop Lock)"]
+    Gate -- "PASS + DONE" --> Mark["Mark Sub-Step COMPLETED\n& Spawn Next Sub-Step Session"]
+    Gate -- "PASS + NEEDS_MORE_WORK" --> Cont["Spawn Continuation Session\nwith Remaining Todo (Max 3)"]
+    Gate -- "FAIL" --> Retry["Record Attempt History & Retry\n(Halts on Ping-Pong Duplicate Error)"]
 ```
 
 ### Run Unattended with Any CLI Tool
@@ -304,7 +316,19 @@ Runs the project's configured compile/test command (from `.mstack/target-profile
   "./gradlew :features:payment:impl:testDebugUnitTest"
 ```
 
-### 3. `log-evidence.sh` — Append-Only Evidence Logger
+### 3. `handoff-substep.sh` — Verified Sub-Step Handoff & Golden Lock Recorder
+Records what a sub-step session completed, verifies that all listed `--files` exist on disk, locks SHA-256 checksums of Golden Master files (`--lock-golden`), and either marks the sub-step ready (`DONE`) or hands off remaining items (`NEEDS_MORE_WORK` / `--spawn-substep`) to the next sequentially spawned agent session.
+```bash
+./mobile-migration-tools/scripts/handoff-substep.sh \
+  --step-id "<substep_id>" \
+  --status <DONE|NEEDS_MORE_WORK> \
+  --summary "<what was done>" \
+  [--files "<path1,path2>"] \
+  [--lock-golden "<golden_file1,golden_file2>"] \
+  [--remaining "<todo_item_1|todo_item_2>"]
+```
+
+### 4. `log-evidence.sh` — Append-Only Evidence Logger
 Records architectural decisions, parity metrics, and verification artifacts to `.mstack/audit.tsv`.
 ```bash
 ./mobile-migration-tools/scripts/log-evidence.sh \

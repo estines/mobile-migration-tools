@@ -20,9 +20,10 @@ Usage:
 
 Commands:
   init, install             Install mobile-migration-tools (skills, scripts, rules) into the workspace (default)
-  automate <args...>        Run long-running non-interactive CLI automation across all steps in .mstack/migration-plan.json (automate-plan.sh)
+  automate <args...>        Run sequential 1-sub-step-per-session CLI automation across .mstack/migration-plan.json (automate-plan.sh)
+  handoff <args...>         Record sub-step completion, Golden SHA-256 locks, or handoff remaining work to next agent (handoff-substep.sh)
   detect [dir]              Run the workspace baseline detector (detect-project.sh)
-  compile-gate <args...>    Run the Universal Always-Compile gate (compile-gate.sh)
+  compile-gate <args...>    Run the Universal Always-Compile & Anti-Slop gate (compile-gate.sh)
   log-evidence <args...>    Append an evidence row to .mstack/audit.tsv (log-evidence.sh)
 
 Options for init/install:
@@ -220,6 +221,11 @@ function main() {
 
   if (first === "automate") {
     runShellScript("automate-plan.sh", args.slice(1));
+    return;
+  }
+
+  if (first === "handoff") {
+    runShellScript("handoff-substep.sh", args.slice(1));
     return;
   }
 
