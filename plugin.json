@@ -1,0 +1,11 @@
+{
+  "name": "mobile-migration-tools",
+  "displayName": "Mobile Migration Tools (mstack)",
+  "version": "1.0.0",
+  "description": "A pstack-inspired, language-agnostic mobile migration toolkit enforcing Always-Compile discipline, Golden Master visual pixel-diffing, Scientist dual-run logic parity, and decoupled UI-then-Navigation strangler workflows.",
+  "suggestedPrompts": [
+    "Run mstack-setup to detect this project and configure our target migration stack",
+    "Start mstack-mode to plan and execute a 100% parity migration for a feature",
+    "Verify compilation, visual parity, and logic parity gates with mstack"
+  ]
+}
