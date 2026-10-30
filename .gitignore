@@ -14,3 +14,6 @@ Thumbs.db
 node_modules/
 *.tgz
 npm-debug.log*
+
+# mstack runtime artifacts
+.mstack/

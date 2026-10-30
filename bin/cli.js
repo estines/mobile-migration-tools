@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+process.env.PATH = `${process.env.HOME}/.gemini/bin:${process.env.HOME}/.gemini/antigravity/bin:/opt/homebrew/bin:/usr/local/bin:${process.env.PATH || ""}`;
+
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
@@ -20,7 +22,10 @@ Usage:
 
 Commands:
   init, install             Install mobile-migration-tools (skills, scripts, rules) into the workspace (default)
-  automate <args...>        Run sequential 1-sub-step-per-session CLI automation across .mstack/migration-plan.json (automate-plan.sh)
+  automate <args...>        Run sequential 1-sub-step-per-session CLI automation across .mstack/migration-plan.json
+                            (Supports --background, --stop, --cli <preset>, --features <F1,F2>, --status)
+  dashboard [options]       Launch 3D migration hologram dashboard & live server (scripts/dashboard-server.js)
+                            (Options: --port <num>, --open)
   handoff <args...>         Record sub-step completion, Golden SHA-256 locks, or handoff remaining work to next agent (handoff-substep.sh)
   detect [dir]              Run the workspace baseline detector (detect-project.sh)
   compile-gate <args...>    Run the Universal Always-Compile & Anti-Slop gate (compile-gate.sh)
@@ -50,7 +55,7 @@ function copyDirRecursive(src, dest, makeScriptsExecutable = false) {
       copyDirRecursive(srcPath, destPath, makeScriptsExecutable);
     } else if (entry.isFile()) {
       fs.copyFileSync(srcPath, destPath);
-      if (makeScriptsExecutable && entry.name.endsWith(".sh")) {
+      if (makeScriptsExecutable && (entry.name.endsWith(".sh") || entry.name.endsWith(".js"))) {
         fs.chmodSync(destPath, 0o755);
       }
     }
@@ -190,6 +195,20 @@ function runShellScript(scriptName, scriptArgs) {
   const result = spawnSync("bash", [scriptToRun, ...scriptArgs], {
     stdio: "inherit",
     cwd: process.cwd(),
+    env: process.env,
+  });
+  process.exit(result.status ?? 1);
+}
+
+function runNodeScript(scriptName, scriptArgs) {
+  const localScript = path.join(process.cwd(), "mobile-migration-tools", "scripts", scriptName);
+  const bundledScript = path.join(PKG_ROOT, "scripts", scriptName);
+  const scriptToRun = fs.existsSync(localScript) ? localScript : bundledScript;
+
+  const result = spawnSync("node", [scriptToRun, ...scriptArgs], {
+    stdio: "inherit",
+    cwd: process.cwd(),
+    env: process.env,
   });
   process.exit(result.status ?? 1);
 }
@@ -221,6 +240,11 @@ function main() {
 
   if (first === "automate") {
     runShellScript("automate-plan.sh", args.slice(1));
+    return;
+  }
+
+  if (first === "dashboard") {
+    runNodeScript("dashboard-server.js", args.slice(1));
     return;
   }
 

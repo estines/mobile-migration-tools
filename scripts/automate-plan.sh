@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH="$HOME/.gemini/bin:$HOME/.gemini/antigravity/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 # mstack Long-Running Non-Interactive Sub-Step Automation Runner (v2 — Atomic Sub-Step + Handoff + Anti-Slop)
 #
@@ -36,6 +36,9 @@ STATUS_ONLY=false
 DRY_RUN=false
 RESET_FAILED=false
 ALLOW_NOOP=false
+RUN_BACKGROUND=false
+STOP_AUTOMATION=false
+OPEN_DASHBOARD=false
 
 usage() {
   cat <<'EOF'
@@ -45,7 +48,7 @@ Usage:
 
 Description:
   Sequential 1-sub-step-per-session non-interactive automation runner with verified
-  agent-to-agent handoffs and anti-slop circuit breakers.
+  agent-to-agent handoffs, 3D hologram dashboard, and anti-slop circuit breakers.
 
 Options:
   --features <F1,F2,...>       Initialize/append features to .mstack/migration-plan.json
@@ -53,15 +56,18 @@ Options:
                                Valid phases: step1, step2, step3, step4-greenfield, step4-cutover
   --granularity <mode>         'substep' (default: 1.1, 1.2, 1.3, 1.4... 1 sub-step per session)
                                or 'phase' (coarse step1, step2, step3)
-  --init-only                  Only generate/update .mstack/migration-plan.json without running
+  --background, --daemon       Run unattended automation loop detached in the background
+  --stop                       Stop running background automation process
+  --open-dashboard             Automatically launch 3D HTML dashboard in default browser
+  --init-only                  Only generate/update .mstack/migration-plan.json and dashboard without running
   --status                     Print detailed progress & handoff state of .mstack/migration-plan.json
   --reset-failed               Reset any FAILED or IN_PROGRESS sub-steps back to PENDING
-  --cli <preset>               CLI tool preset to run in non-interactive mode:
-                                 agy     : agy -p "<prompt>"
+  --cli <preset>               CLI tool preset to run in non-interactive mode (auto-approves permissions):
+                                 agy     : agy -p "<prompt>" --dangerously-skip-permissions
                                  claude  : claude -p "<prompt>" --dangerously-skip-permissions
                                  codex   : codex exec --full-auto "<prompt>"
                                  gemini  : gemini -p "<prompt>" --yolo
-                                 aider   : aider --yes-always --message "<prompt>"
+                                 aider   : aider --yes-always --no-auto-commits --message "<prompt>"
   --cli-cmd "<template>"       Custom non-interactive CLI command template ({PROMPT_FILE} or {PROMPT})
   --plan <path>                Path to migration plan JSON (default: .mstack/migration-plan.json)
   --max-steps <N>              Stop after completing N sub-step sessions (0 = run all pending)
@@ -131,6 +137,18 @@ while [[ $# -gt 0 ]]; do
       DRY_RUN=true
       shift
       ;;
+    --background|--daemon)
+      RUN_BACKGROUND=true
+      shift
+      ;;
+    --stop)
+      STOP_AUTOMATION=true
+      shift
+      ;;
+    --open-dashboard)
+      OPEN_DASHBOARD=true
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -144,6 +162,31 @@ while [[ $# -gt 0 ]]; do
 done
 
 mkdir -p "$(dirname "$PLAN_FILE")" .mstack/logs .mstack/prompts
+
+if [[ "$STOP_AUTOMATION" == "true" ]]; then
+  PID_FILE=".mstack/automation.pid"
+  if [[ -f "$PID_FILE" ]]; then
+    RUNNER_PID="$(cat "$PID_FILE" | tr -d ' ')"
+    if [[ -n "$RUNNER_PID" ]] && kill -0 "$RUNNER_PID" 2>/dev/null; then
+      echo "[mstack automate] Terminating background automation runner (PID $RUNNER_PID)..."
+      kill "$RUNNER_PID" 2>/dev/null || true
+      sleep 1
+      if kill -0 "$RUNNER_PID" 2>/dev/null; then
+        kill -9 "$RUNNER_PID" 2>/dev/null || true
+      fi
+      rm -f "$PID_FILE"
+      echo "✔ Background automation runner stopped."
+      exit 0
+    else
+      rm -f "$PID_FILE"
+      echo "[mstack automate] Removed stale PID file (process $RUNNER_PID was not running)."
+      exit 0
+    fi
+  else
+    echo "[mstack automate] No background automation process running (.mstack/automation.pid not found)."
+    exit 0
+  fi
+fi
 
 # Ensure target-profile.json exists (or create a sensible non-interactive default if missing)
 if [[ ! -f ".mstack/target-profile.json" ]]; then
@@ -452,6 +495,11 @@ console.log(`[mstack automate] Updated plan file: ${planFile} (${plan.steps.leng
 NODE_EOF
 fi
 
+# Always synchronize 3D Hologram Dashboard on disk
+if [[ -f "$PLAN_FILE" ]]; then
+  node "$SCRIPT_DIR/generate-dashboard.js" "$PLAN_FILE" >/dev/null 2>&1 || true
+fi
+
 if [[ ! -f "$PLAN_FILE" ]]; then
   echo "ERROR: No migration plan found at $PLAN_FILE." >&2
   echo "Initialize one with: npx mobile-migration-tools automate --features \"FeatureA,FeatureB\"" >&2
@@ -475,6 +523,7 @@ for (const s of plan.steps) {
 fs.writeFileSync(planFile, JSON.stringify(plan, null, 2) + "\n", "utf8");
 console.log(`[mstack automate] Reset ${count} FAILED/IN_PROGRESS sub-step(s) for retry.`);
 NODE_EOF
+  node "$SCRIPT_DIR/generate-dashboard.js" "$PLAN_FILE" >/dev/null 2>&1 || true
 fi
 
 print_status() {
@@ -509,7 +558,78 @@ NODE_EOF
 }
 
 if [[ "$STATUS_ONLY" == "true" || "$INIT_ONLY" == "true" ]]; then
+  node "$SCRIPT_DIR/generate-dashboard.js" "$PLAN_FILE" >/dev/null 2>&1 || true
   print_status
+  exit 0
+fi
+
+# Background / Daemon Dispatcher
+if [[ "$RUN_BACKGROUND" == "true" ]]; then
+  PID_FILE=".mstack/automation.pid"
+  if [[ -f "$PID_FILE" ]]; then
+    EXISTING_PID="$(cat "$PID_FILE" 2>/dev/null | tr -d ' ' || true)"
+    if [[ -n "$EXISTING_PID" ]] && kill -0 "$EXISTING_PID" 2>/dev/null; then
+      echo "⚠️  [mstack automate] An automation runner is ALREADY RUNNING in background (PID: $EXISTING_PID)."
+      echo "   To monitor: tail -f .mstack/logs/automation.log"
+      echo "   To stop   : ./mobile-migration-tools/scripts/automate-plan.sh --stop"
+      DASH_URL="http://localhost:3333"
+      [[ -f ".mstack/dashboard.url" ]] && DASH_URL="$(cat .mstack/dashboard.url | tr -d '\n')"
+      echo "   3D Hologram: $DASH_URL"
+      exit 0
+    else
+      rm -f "$PID_FILE"
+    fi
+  fi
+
+  # Generate 3D dashboard upfront
+  node "$SCRIPT_DIR/generate-dashboard.js" "$PLAN_FILE" >/dev/null 2>&1 || true
+
+  # Ensure Dashboard server is active in background
+  if ! pgrep -f "dashboard-server.js" >/dev/null 2>&1; then
+    nohup node "$SCRIPT_DIR/dashboard-server.js" </dev/null >>.mstack/logs/dashboard-server.log 2>&1 &
+    disown 2>/dev/null || true
+    sleep 0.5
+  fi
+
+  FILTERED_ARGS=()
+  for a in "$@"; do
+    if [[ "$a" != "--background" && "$a" != "--daemon" ]]; then
+      FILTERED_ARGS+=("$a")
+    fi
+  done
+
+  echo "🚀 [mstack automate] Spawning non-interactive automation runner in background..."
+  if [[ ${#FILTERED_ARGS[@]} -gt 0 ]]; then
+    nohup "$SCRIPT_DIR/automate-plan.sh" "${FILTERED_ARGS[@]}" </dev/null >>.mstack/logs/automation.log 2>&1 &
+  else
+    nohup "$SCRIPT_DIR/automate-plan.sh" </dev/null >>.mstack/logs/automation.log 2>&1 &
+  fi
+  RUNNER_PID=$!
+  disown 2>/dev/null || true
+  echo "$RUNNER_PID" > "$PID_FILE"
+
+  DASHBOARD_URL="http://localhost:3333"
+  if [[ -f ".mstack/dashboard.url" ]]; then
+    DASHBOARD_URL="$(cat .mstack/dashboard.url | tr -d '\n')"
+  fi
+  INDEX_FILE="$(pwd)/.mstack/dashboard/index.html"
+
+  echo ""
+  echo "================================================================================"
+  echo "✔ mstack Background Automation Runner ACTIVE!"
+  echo "   PID               : $RUNNER_PID"
+  echo "   Runner Log        : .mstack/logs/automation.log"
+  echo "   3D HTML Dashboard : $DASHBOARD_URL"
+  echo "   Local HTML File   : file://$INDEX_FILE"
+  echo "   Status Command    : npx mobile-migration-tools automate --status"
+  echo "   Stop Command      : npx mobile-migration-tools automate --stop"
+  echo "================================================================================"
+  echo ""
+
+  if [[ "$OPEN_DASHBOARD" == "true" && "$(uname)" == "Darwin" ]]; then
+    open "$DASHBOARD_URL" 2>/dev/null || open "file://$INDEX_FILE" 2>/dev/null || true
+  fi
+
   exit 0
 fi
 
@@ -543,6 +663,12 @@ run_cli_with_prompt() {
     return 0
   fi
 
+  # Auto-skip all permissions in unattended non-interactive mode across all CLI runners
+  export CI=true
+  export CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1
+  export ANTHROPIC_DANGEROUSLY_SKIP_PERMISSIONS=true
+  export CLAUDE_AUTO_APPROVE=1
+
   if [[ -n "$CUSTOM_CLI_CMD" ]]; then
     local cmd="$CUSTOM_CLI_CMD"
     if [[ "$cmd" == *"{PROMPT_FILE}"* ]]; then
@@ -558,7 +684,7 @@ run_cli_with_prompt() {
 
   case "$CLI_PRESET" in
     agy)
-      agy -p "$prompt_text" >"$log_file" 2>&1
+      agy -p "$prompt_text" --dangerously-skip-permissions >"$log_file" 2>&1
       ;;
     claude)
       claude -p "$prompt_text" --dangerously-skip-permissions >"$log_file" 2>&1
@@ -570,7 +696,7 @@ run_cli_with_prompt() {
       gemini -p "$prompt_text" --yolo >"$log_file" 2>&1
       ;;
     aider)
-      aider --yes-always --message "$prompt_text" >"$log_file" 2>&1
+      aider --yes-always --no-auto-commits --message "$prompt_text" >"$log_file" 2>&1
       ;;
     *)
       echo "ERROR: Unsupported --cli preset '$CLI_PRESET'. Use agy, claude, codex, gemini, aider, or --cli-cmd." >&2
@@ -802,6 +928,17 @@ echo "   Max Retries/Step  : $MAX_RETRIES"
 echo "   Max Continuations : $MAX_CONTINUATIONS per sub-step"
 echo "================================================================================"
 
+# Record foreground PID and ensure dashboard server is alive
+echo "$$" > .mstack/automation.pid
+trap 'rm -f .mstack/automation.pid' EXIT
+
+if ! pgrep -f "dashboard-server.js" >/dev/null 2>&1; then
+  nohup node "$SCRIPT_DIR/dashboard-server.js" </dev/null >>.mstack/logs/dashboard-server.log 2>&1 &
+  disown 2>/dev/null || true
+  sleep 0.5
+fi
+node "$SCRIPT_DIR/generate-dashboard.js" "$PLAN_FILE" >/dev/null 2>&1 || true
+
 SESSIONS_COMPLETED_THIS_RUN=0
 
 while true; do
@@ -839,6 +976,7 @@ while true; do
 
   for (( ATTEMPT=1; ATTEMPT<=MAX_RETRIES; ATTEMPT++ )); do
     update_step_state "$STEP_ID" "IN_PROGRESS" "true" "false"
+    node "$SCRIPT_DIR/generate-dashboard.js" "$PLAN_FILE" >/dev/null 2>&1 || true
     TIMESTAMP=$(date -u +"%Y%m%dT%H%M%SZ")
     PROMPT_FILE=".mstack/prompts/prompt_${STEP_ID}_cont${CONT_USED}_attempt${ATTEMPT}.md"
     AGENT_LOG=".mstack/logs/agent_${STEP_ID}_cont${CONT_USED}_attempt${ATTEMPT}_${TIMESTAMP}.log"
@@ -945,22 +1083,26 @@ while true; do
       NEXT_CONT=$((CONT_USED + 1))
       if [[ "$NEXT_CONT" -gt "$MAX_CONTINUATIONS" ]]; then
         update_step_state "$STEP_ID" "FAILED" "false" "false"
+        node "$SCRIPT_DIR/generate-dashboard.js" "$PLAN_FILE" >/dev/null 2>&1 || true
         "$LOG_EVIDENCE" "$STEP_ID" "$PRINCIPLES" "Exceeded max continuations ($MAX_CONTINUATIONS) for $STEP_ID (Slop Loop Prevention)" "${CUSTOM_CLI_CMD:-$CLI_PRESET}" "$PLAN_FILE" "SLOP_MAX_CONTINUATIONS"
         echo "❌ [SLOP_GUARD] Sub-Step '$STEP_ID' requested NEEDS_MORE_WORK more than --max-continuations ($MAX_CONTINUATIONS) times. Halting to prevent infinite handoff loop." >&2
         print_status
         exit 1
       fi
       update_step_state "$STEP_ID" "NEEDS_MORE_WORK" "false" "true"
+      node "$SCRIPT_DIR/generate-dashboard.js" "$PLAN_FILE" >/dev/null 2>&1 || true
       "$LOG_EVIDENCE" "$STEP_ID" "$PRINCIPLES" "Partial sub-step compiled & verified; handed off remaining work to continuation session $NEXT_CONT/$MAX_CONTINUATIONS" "${CUSTOM_CLI_CMD:-$CLI_PRESET}" "$PLAN_FILE" "SUBSTEP_HANDOFF_CONTINUE"
       echo "  🔄 Handoff recorded for '$STEP_ID' (NEEDS_MORE_WORK). Spawning next fresh session ($NEXT_CONT/$MAX_CONTINUATIONS) for remaining items..."
       SESSIONS_COMPLETED_THIS_RUN=$((SESSIONS_COMPLETED_THIS_RUN + 1))
     else
       update_step_state "$STEP_ID" "COMPLETED" "false" "false"
+      node "$SCRIPT_DIR/generate-dashboard.js" "$PLAN_FILE" >/dev/null 2>&1 || true
       "$LOG_EVIDENCE" "$STEP_ID" "$PRINCIPLES" "Completed sub-step $STEP_ID for $FEATURE" "${CUSTOM_CLI_CMD:-$CLI_PRESET}" "$PLAN_FILE" "SUBSTEP_COMPLETED"
       SESSIONS_COMPLETED_THIS_RUN=$((SESSIONS_COMPLETED_THIS_RUN + 1))
     fi
   else
     update_step_state "$STEP_ID" "FAILED" "false" "false"
+    node "$SCRIPT_DIR/generate-dashboard.js" "$PLAN_FILE" >/dev/null 2>&1 || true
     "$LOG_EVIDENCE" "$STEP_ID" "$PRINCIPLES" "Failed sub-step $STEP_ID after $MAX_RETRIES attempts" "${CUSTOM_CLI_CMD:-$CLI_PRESET}" "$PLAN_FILE" "SUBSTEP_FAILED"
     echo "❌ [mstack automate] Sub-Step '$STEP_ID' failed verification. Stopping loop to preserve Always-Compile discipline." >&2
     print_status
@@ -968,4 +1110,5 @@ while true; do
   fi
 done
 
+node "$SCRIPT_DIR/generate-dashboard.js" "$PLAN_FILE" >/dev/null 2>&1 || true
 print_status

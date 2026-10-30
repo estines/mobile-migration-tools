@@ -1,36 +1,124 @@
 ---
 name: mstack-automation
 description: >-
-  Unattended, sequential 1-sub-step-per-session migration automation mode for mobile-migration-tools (mstack) with verified agent-to-agent handoffs and anti-slop circuit breakers. Use when the user wants continuous multi-step execution without stopping after 1 step, or wants to run migrations headlessly using any CLI tool (agy, claude, codex, gemini, aider, or custom CLI).
+  Unattended, sequential 1-sub-step-per-session migration automation mode for mobile-migration-tools (mstack) with 3D hologram dashboard visualization, verified agent-to-agent handoffs, and anti-slop circuit breakers. Use when the user asks to run automation, modernize features headlessly, or monitor migrations via the 3D HTML dashboard.
 ---
 
-# `mstack-automation` — Sequential 1-Sub-Step-Per-Session Automation & Handoff
+# `mstack-automation` — 3D Hologram Visualization & Non-Interactive Automation
 
-## Why `mstack-automation` Runs 1 Sub-Step per Session with Verified Handoffs
+## 1. Golden Rule for Interactive Sessions (Claude, Antigravity, Cursor)
 
-Running an entire migration phase (4 sub-steps) in a single session causes **quadratic token bloat** and **late-session fatigue** (where the agent rushes or stubs Sub-Steps `.3` and `.4`).
+When the user asks to execute or run **`mstack-automation`** inside an interactive chat session (e.g. Claude session, Cursor, Antigravity):
 
-`mstack-automation` solves this with **three core mechanisms**:
-1. **Sequential 1-Sub-Step-Per-Session Execution**: Expands every feature into atomic sub-steps (`1.1`, `1.2`, `1.3`, `1.4`, `2.1`, `2.2`, `2.3`, `2.4`, `3.1`, `3.2`, `3.3`, `3.4`) in `.mstack/migration-plan.json` and spawns **1 fresh non-interactive CLI session per 1 sub-step**.
-2. **Verified Agent-to-Agent Handoff (`handoff-substep.sh`)**: Every sub-step session must record what it completed (`--summary`, fact-checked `--files`, and `--lock-golden`). If a sub-step requires more work than fits in 1 session, the agent compiles its partial slice and calls `handoff-substep.sh --status NEEDS_MORE_WORK --remaining "todo1|todo2"` (or `--spawn-substep "<title>"`) so the next spawned session picks up seamlessly.
-3. **5 Anti-Slop Circuit Breakers**:
-   - **Immutable Golden Master SHA-256 Locks**: Golden JSON/PNG files locked in `1.1`, `2.1`, and `3.1` are hash-verified by `compile-gate.sh` in `1.3`, `2.3`, and `3.4`. Agents cannot overwrite Golden baselines to fake a pass.
-   - **Non-Empty Git Diff Guard**: Sessions that exit without changing any files or recording a handoff are rejected as `SLOP_NO_OP`.
-   - **Bounded Continuations (`--max-continuations 3`)**: Prevents infinite procrastination loops when handing off `NEEDS_MORE_WORK`.
-   - **Cumulative Attempt History & Ping-Pong Circuit Breaker**: Injects all prior failed attempts into retries and halts immediately if two consecutive attempts produce the identical error hash.
-   - **Phase Boundary & `@Ignore` Guard**: Rejects `git diff` changes that add `@Ignore`/`@Disabled` to tests or modify Legacy UI XML/Storyboards during Step 1.
+> **THE MAIN SESSION DOES NOT RUN MIGRATION STEPS IN THE CHAT.**
+> Instead, the main session performs **three quick actions**, launches the background runner, and notifies the user to watch the real-time **3D Hologram Dashboard**:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as User
+    participant Chat as Main Chat Session (Claude / agy)
+    participant Runner as Background Runner (automate-plan.sh --background)
+    participant Dash as 3D Hologram Server (http://localhost:3333)
+
+    User->>Chat: "Run mstack-automation for Login and Payment"
+    Note over Chat: 1. Inspect / Init Plan
+    Chat->>Chat: Check .mstack/migration-plan.json (or --init-only)
+    Chat->>Chat: Find current pending sub-step & next actions
+    Note over Chat: 2. Launch Background Runner (Skip All Permissions)
+    Chat->>Runner: automate-plan.sh --background --cli <preset>
+    Runner->>Dash: Spawn dashboard-server.js & generate 3D hologram
+    Runner-->>Chat: Returns PID, log path, and dashboard URLs
+    Note over Chat: 3. Notify User & End Turn
+    Chat->>User: Concise status summary + 3D Hologram links (http://localhost:3333)
+    Note over User,Dash: User watches real-time 3D state transitions in browser!
+```
+
+### The 3 Mandatory Actions of the Main Session:
+
+1. **Find Current Step & Next Actions**:
+   Inspect `.mstack/migration-plan.json` (or initialize if not yet created via `./mobile-migration-tools/scripts/automate-plan.sh --init-only --features "<Feature>"`).
+   Identify:
+   - The current active/pending sub-step (e.g. `login-step1-1: Characterize Legacy Logic & Record Golden Master Baseline`).
+   - Immediate next actions and remaining items.
+   - Overall pipeline counts (e.g. `0 Done, 24 Queued`).
+
+2. **Fire Detached Background Automation (All Permissions Skipped)**:
+   Launch the runner in detached background mode with permission skipping enabled:
+   ```bash
+   npx mobile-migration-tools automate --background --cli claude
+   # or with agy:
+   npx mobile-migration-tools automate --background --cli agy
+   # or with gemini:
+   npx mobile-migration-tools automate --background --cli gemini
+   ```
+   *Note: In non-interactive mode, all CLI runners auto-skip permissions (`--dangerously-skip-permissions` for Claude and agy, `--yolo` for Gemini, `--full-auto` for Codex).*
+
+3. **Notify User & Direct to 3D Dashboard**:
+   Respond with a clear, concise summary and direct the user to the **3D Hologram Dashboard**:
+   - **Current Task**: `<Feature> — Sub-Step <X.Y>: <Title>`
+   - **Next Actions**: `<Summary of next queued steps>`
+   - **3D Dashboard URL**: `http://localhost:3333` (or `file://<workspace>/.mstack/dashboard/index.html`)
+   - **Monitoring Command**: `npx mobile-migration-tools automate --status`
+   - **Stop Command**: `npx mobile-migration-tools automate --stop`
+
+---
+
+## 2. The 3D Hologram Dashboard (`.mstack/dashboard/`)
+
+`mstack` includes a futuristic 3D WebGL / Three.js interactive hologram dashboard that visualizes each feature pipeline and state transition in real time.
+
+```
+       [ 3D SPATIAL PIPELINE VIEW ]
+  
+  Feature: Login
+  [1.1] ──── [1.2] ──── [1.3] ──── [1.4] ──── [2.1] ...
+   ▲          ▲          ▲
+COMPLETED  RUNNING    PENDING
+ (Emerald)  (Cyan)    (Glass)
+  Crystal   Reactor    Block
+```
+
+### 3D Representations for Each State:
+| State | 3D Visual Geometry & Shader | Animation & Particle Effects |
+| :--- | :--- | :--- |
+| **`COMPLETED`** | Emerald Octahedron Crystal | Stable levitation, rotating halo, solid glowing emerald conduit |
+| **`IN_PROGRESS`** | Cyan Plasma Reactor Core | Dual counter-rotating gimbal rings, pulsing energy laser, orbital satellites |
+| **`NEEDS_MORE_WORK`** | Amber Kinetic Dodecahedron | Pulsing warning aura, continuation badge (`cont: X/3`) |
+| **`FAILED`** | Shattered Obsidian / Ruby Prism | Flashing red warning beacon, distressed geometry, failure inspector |
+| **`PENDING`** | Frosted Cyber-Glass Monolith | Translucent idle box with soft wireframe outline |
+
+### Dashboard Features:
+- **Interactive 3D Navigation**: Orbit, pan, and zoom with mouse or touch. Camera angle presets: `Isometric`, `Top-Down`, `Side Flyby`, `Front Grid`.
+- **Focus Active Step**: Click `🎯 Focus Active` to smoothly fly the camera straight to the currently executing sub-step.
+- **Node Inspector Drawer**: Click any 3D node to open a glassmorphism HUD showing its goal, required principles, verified files touched, locked Golden Master SHA-256 hashes, handoff summaries, and error logs.
+- **Dual Connection Modes**:
+  1. **Live HTTP Server**: Serves on `http://localhost:3333` with live auto-refresh every 1.5 seconds.
+  2. **Zero-CORS Local File**: Opens directly via `file://.../.mstack/dashboard/index.html` with dynamic script-tag reloading (no browser CORS blocks).
+- **Holographic Audio**: Optional synthesized SFX using Web Audio API (chimes on sub-step completion, tones on failure).
+
+To manually start or view the dashboard:
+```bash
+npx mobile-migration-tools dashboard --port 3333 --open
+```
+
+---
+
+## 3. Automation Architecture & Circuit Breakers
+
+Running an entire migration phase in a single session causes **quadratic token bloat** and **late-session fatigue**. `mstack-automation` solves this by spawning **1 fresh non-interactive CLI session per 1 sub-step** with verified handoffs and 5 anti-slop circuit breakers:
 
 ```mermaid
 flowchart TD
     Plan[".mstack/migration-plan.json\n(Sub-Step Queue: 1.1, 1.2, 1.3, 1.4, 2.1...)"] --> Next{"Next NEEDS_MORE_WORK\nor PENDING Sub-Step?"}
-    Next -- "None Left" --> Done["All Sub-Steps COMPLETED"]
+    Next -- "None Left" --> Done["All Sub-Steps COMPLETED\n(3D Dashboard Turns Emerald)"]
     Next -- "Pick 1 Sub-Step" --> Prompt["Build Focused Prompt\n+ Prior Verified Handoffs\n+ Locked Golden SHA-256s\n+ Remaining Todo / Attempt History"]
-    Prompt --> Exec["Spawn 1 Non-Interactive CLI Session\n(agy / claude / codex / gemini / custom)"]
+    Prompt --> Exec["Spawn 1 Fresh Session (Non-Interactive)\n(agy / claude --dangerously-skip-permissions)"]
     Exec --> Handoff["Agent Runs handoff-substep.sh\n(--status DONE or NEEDS_MORE_WORK\n+ --files + --lock-golden)"]
     Handoff --> Gate["Outer Runner Executes compile-gate.sh\n(Golden Hash Check + Anti-Cheat + Build/Tests)"]
-    Gate -- "PASS + DONE" --> MarkPass["Mark Sub-Step COMPLETED\nSpawn Next Sub-Step Session"]
+    Gate -- "PASS + DONE" --> MarkPass["Mark Sub-Step COMPLETED\nUpdate 3D Dashboard\nSpawn Next Sub-Step Session"]
     Gate -- "PASS + NEEDS_MORE_WORK" --> Cont{"Continuations < Max (3)?"}
-    Cont -- "Yes" --> NextCont["Keep Queued with Remaining Todo\nSpawn Next Continuation Session"]
+    Cont -- "Yes" --> NextCont["Update 3D Dashboard (Amber)\nKeep Queued with Remaining Todo\nSpawn Next Continuation Session"]
     Cont -- "No" --> Halt["Halt: Max Continuations Exceeded"]
     Gate -- "FAIL" --> PingPong{"Same Error Hash as\nPrevious Attempt?"}
     PingPong -- "Yes" --> Halt2["Circuit Breaker: Halt Ping-Pong Loop"]
@@ -40,82 +128,48 @@ flowchart TD
     Retry --> Prompt
 ```
 
+### The 5 Anti-Slop Circuit Breakers:
+1. **Immutable Golden Master SHA-256 Locks**: Baselines locked in `1.1`, `2.1`, and `3.1` are checksum-verified by `compile-gate.sh`. Agents cannot overwrite Golden files to fake a pass.
+2. **Non-Empty Git Diff Guard**: Sessions that exit without modifying files and without recording a handoff are rejected as `SLOP_NO_OP`.
+3. **Bounded Continuations (`--max-continuations 3`)**: Prevents infinite procrastination loops when handing off `NEEDS_MORE_WORK`.
+4. **Anti-Ping-Pong Error Memory**: Re-injects previous failure error tails and halts immediately if two consecutive attempts produce an identical error hash.
+5. **Phase Boundary & `@Ignore` Guard**: Rejects changes that add `@Ignore`/`@Disabled` or modify Legacy XML layouts during Step 1.
+
 ---
 
-## Mode A: External Non-Interactive CLI Runner (`automate-plan.sh`)
+## 4. CLI Command Cheat Sheet
 
-### 1. Run Unattended Across All Sub-Steps (`1 Sub-Step = 1 Session`)
-
+### Start Unattended Automation in Background (Preferred):
 ```bash
-# Antigravity CLI (agy) — 1 sub-step per session:
-npx mobile-migration-tools automate \
-  --features "Login,PaymentConfirmation,TransferReceipt" \
-  --cli agy
+# Using Claude Code (skips all permissions):
+npx mobile-migration-tools automate --features "Login,Payment" --background --cli claude
 
-# Claude Code CLI:
-npx mobile-migration-tools automate \
-  --features "Login,PaymentConfirmation,TransferReceipt" \
-  --cli claude
+# Using Antigravity CLI (agy):
+npx mobile-migration-tools automate --features "Login,Payment" --background --cli agy
 
-# OpenAI Codex CLI:
-npx mobile-migration-tools automate \
-  --features "Login,PaymentConfirmation,TransferReceipt" \
-  --cli codex
-
-# Gemini CLI:
-npx mobile-migration-tools automate \
-  --features "Login,PaymentConfirmation,TransferReceipt" \
-  --cli gemini
-
-# Any custom CLI command template:
-npx mobile-migration-tools automate \
-  --features "PaymentConfirmation" \
-  --cli-cmd 'my-custom-cli run --headless --prompt-file {PROMPT_FILE}'
+# Using Gemini CLI:
+npx mobile-migration-tools automate --features "Login,Payment" --background --cli gemini
 ```
 
-### 2. How Each Sub-Step Session Hands Off Work (`handoff-substep.sh`)
-
-Before exiting a sub-step session, the agent updates `.mstack/migration-plan.json` using `./mobile-migration-tools/scripts/handoff-substep.sh`:
-
-- **When the sub-step is 100% complete (`DONE`)**:
-  ```bash
-  ./mobile-migration-tools/scripts/handoff-substep.sh \
-    --step-id "paymentconfirmation-step1-1" \
-    --status DONE \
-    --summary "Captured 64 Golden Master cases from LegacyPaymentCalculator" \
-    --files "features/payment/impl/src/test/kotlin/PaymentGoldenTest.kt" \
-    --lock-golden "features/payment/impl/src/test/resources/payment_golden.json"
-  ```
-
-- **When the sub-step needs more work and hands off to the next spawned agent (`NEEDS_MORE_WORK` or `--spawn-substep`)**:
-  ```bash
-  ./mobile-migration-tools/scripts/handoff-substep.sh \
-    --step-id "paymentconfirmation-step1-3" \
-    --status NEEDS_MORE_WORK \
-    --summary "Implemented PaymentDomainModel and FeeCalculatorUseCase (42/64 golden cases passing)" \
-    --files "features/payment/api/PaymentModels.kt,features/payment/impl/FeeCalculatorUseCase.kt" \
-    --remaining "Implement CurrencyRoundingMapper for TH locale|Pass remaining 22 golden test cases"
-  ```
-
-### 3. Inspect Queue Status, Handoff Notes, and Locked Goldens
-
+### Inspect Live Status:
 ```bash
-# View live sub-step status, last handoff summary, and remainingTodo for next agent:
+# Print formatted CLI table of all sub-steps, handoff notes, and remaining todos:
 npx mobile-migration-tools automate --status
-
-# Reset any FAILED/IN_PROGRESS sub-steps and resume:
-npx mobile-migration-tools automate --reset-failed --cli agy
 ```
 
----
+### Terminate Running Background Automation:
+```bash
+# Stop background process cleanly and release locks:
+npx mobile-migration-tools automate --stop
+```
 
-## Mode B: In-Session Execution & Handoff Protocol
+### Launch or Open 3D Hologram Dashboard:
+```bash
+# Start local server and open in browser:
+npx mobile-migration-tools dashboard --open
+```
 
-When running inside an interactive or background session where the user asks to execute current required steps and hand off sub-steps sequentially:
-1. Initialize the sub-step plan if not yet created:
-   ```bash
-   ./mobile-migration-tools/scripts/automate-plan.sh --init-only --features "<Feature>"
-   ```
-2. Pick the current required sub-step from `.mstack/migration-plan.json`, execute it cleanly, and verify with `./mobile-migration-tools/scripts/compile-gate.sh`.
-3. Record what was done and any remaining work via `./mobile-migration-tools/scripts/handoff-substep.sh`.
-4. Trigger or spawn the non-interactive sequential sub-step runner (`./mobile-migration-tools/scripts/automate-plan.sh --cli <cli>`) to execute the remaining sub-steps 1 sub-step per 1 session.
+### Reset Failed Steps & Resume:
+```bash
+npx mobile-migration-tools automate --reset-failed --background --cli claude
+```

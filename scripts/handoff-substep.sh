@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH="$HOME/.gemini/bin:$HOME/.gemini/antigravity/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+# SCRIPT_DIR
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # mstack Sub-Step Handoff & Anti-Slop Golden Lock Recorder
 # Called by each non-interactive sub-step session before exiting to:
@@ -283,3 +286,5 @@ fs.writeFileSync(planFile, JSON.stringify(plan, null, 2) + "\n", "utf8");
 
 console.log(`[mstack handoff] Recorded handoff for '${stepId}' (reportedStatus=${handoffStatus}, verifiedFiles=${verifiedFiles.length}, goldenLocks=${plan.goldenLocks.length})`);
 NODE_EOF
+
+node "$SCRIPT_DIR/generate-dashboard.js" "$PLAN_FILE" >/dev/null 2>&1 || true

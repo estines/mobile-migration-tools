@@ -237,38 +237,51 @@ flowchart LR
     Gate -- "FAIL" --> Retry["Record Attempt History & Retry\n(Halts on Ping-Pong Duplicate Error)"]
 ```
 
-### Run Unattended with Any CLI Tool
+### 3D Hologram Pipeline Dashboard (`.mstack/dashboard/`)
+
+`mstack` includes an interactive 3D WebGL / Three.js hologram dashboard that renders each feature pipeline and state transition in real-time space:
+
+- **State Geometries**:
+  - `COMPLETED`: Emerald octahedron crystal with orbiting halo & flowing laser conduit.
+  - `IN_PROGRESS`: Pulsing cyan/plasma reactor core with dual counter-rotating gimbal rings.
+  - `NEEDS_MORE_WORK`: Amber kinetic dodecahedron with continuation badge (`cont: X/3`).
+  - `FAILED`: Shattered ruby prism with flashing alarm beacon.
+  - `PENDING`: Frosted cyber-glass monolith.
+- **Interactive Controls**: 3D orbit controls, camera angle presets (Isometric, Top-Down, Side Flyby, Front Grid), `Focus Active` flyby, and node inspector HUD.
+- **Dual Live Access**:
+  - Live HTTP server: `http://localhost:3333`
+  - Zero-CORS direct file: `file://.../.mstack/dashboard/index.html`
 
 ```bash
-# 1. Antigravity CLI (agy) in non-interactive mode:
-npx mobile-migration-tools automate \
-  --features "Login,PaymentConfirmation,TransferReceipt" \
-  --cli agy
+# Start 3D dashboard server and open in default browser:
+npx mobile-migration-tools dashboard --open
+```
 
-# 2. Claude Code CLI in non-interactive mode:
+### Run Unattended with Any CLI Tool (Background Mode & Permission Skipping)
+
+In interactive sessions (e.g. Claude session, Cursor, Antigravity), the main session launches the runner in detached background mode with all permissions auto-skipped:
+
+```bash
+# 1. Claude Code CLI in background (auto-skips permissions via --dangerously-skip-permissions):
 npx mobile-migration-tools automate \
   --features "Login,PaymentConfirmation,TransferReceipt" \
+  --background \
   --cli claude
 
-# 3. OpenAI Codex CLI in full-auto mode:
+# 2. Antigravity CLI (agy) in background (auto-skips permissions):
 npx mobile-migration-tools automate \
   --features "Login,PaymentConfirmation,TransferReceipt" \
-  --cli codex
+  --background \
+  --cli agy
 
-# 4. Gemini CLI in non-interactive mode:
+# 3. Gemini CLI in background (--yolo):
 npx mobile-migration-tools automate \
   --features "Login,PaymentConfirmation,TransferReceipt" \
+  --background \
   --cli gemini
 
-# 5. Aider CLI in non-interactive mode:
-npx mobile-migration-tools automate \
-  --features "Login,PaymentConfirmation,TransferReceipt" \
-  --cli aider
-
-# 6. Any Custom CLI Command Template ({PROMPT_FILE} or {PROMPT}):
-npx mobile-migration-tools automate \
-  --features "PaymentConfirmation" \
-  --cli-cmd 'my-custom-cli run --headless --prompt-file {PROMPT_FILE}'
+# 4. Terminate running background automation:
+npx mobile-migration-tools automate --stop
 ```
 
 ### Check Progress or Resume an Interrupted Run
@@ -350,5 +363,6 @@ When you use `mstack` in a project, it maintains a clean, auditable `.mstack/` d
 | :--- | :--- |
 | `.mstack/target-profile.json` | Stores your project's detected legacy baseline, user-selected target architecture, and fast compile/test commands. |
 | `.mstack/migration-plan.json` | Persistent state-machine queue (`PENDING` -> `IN_PROGRESS` -> `COMPLETED` / `FAILED`) used by `automate-plan.sh` and `mstack-automation` so multi-step runs never stop after 1 step. |
+| `.mstack/dashboard/` | Real-time 3D Hologram visualization dashboard (`index.html`, `dashboard-data.js`, `live-state.json`). |
 | `.mstack/audit.tsv` | Append-only TSV log tracking every atomic step, which `mstack` principles were applied, the exact command executed, log/snapshot evidence paths, and pass/fail status. |
 | `.mstack/logs/` | Timestamped compiler, test, and headless CLI agent output logs (`compile_<step>_<timestamp>.log`, `agent_<step>_<timestamp>.log`). |
