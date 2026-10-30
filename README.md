@@ -27,10 +27,12 @@ mobile-migration-tools/
 ├── scripts/
 │   ├── detect-project.sh                         # Auto-detects legacy languages, UI, build system, and modules
 │   ├── compile-gate.sh                           # Universal Always-Compile gate runner
-│   └── log-evidence.sh                           # Append-only TSV evidence logger (.mstack/audit.tsv)
+│   ├── log-evidence.sh                           # Append-only TSV evidence logger (.mstack/audit.tsv)
+│   └── automate-plan.sh                          # Long-running non-interactive CLI automation loop
 └── skills/
     ├── mstack-mode/SKILL.md                      # Front-door orchestrator (like /poteto-mode)
     ├── mstack-setup/SKILL.md                     # Interactive project detector & target-stack selector
+    ├── mstack-automation/SKILL.md                # Non-interactive multi-step automation mode (never stops after 1 step)
     ├── mstack-step1-logic-storage/SKILL.md       # Step 1: Approval Tests + Scientist Shadow Logic + Synced Storage
     ├── mstack-step2-ui-parity/SKILL.md           # Step 2: Golden Master Screenshot Diff + Host Interop UI Swap
     ├── mstack-step3-navigation-adaptive/SKILL.md # Step 3: Decoupled Navigation Upgrade + Foldable/Adaptive Scenes
@@ -201,7 +203,76 @@ Covers both building brand-new product features during an ongoing migration (**T
 
 You can also ask the agent to orchestrate an entire feature migration from start to finish:
 
-> *"Migrate the `TransferReceipt` screen using `mstack`. Follow Steps 1 through 3 in order, running the compile and parity gates after each sub-step."*
+> *"Migrate the `TransferReceipt` screen using `mstack` in automation mode. Do not stop after 1 step—complete Steps 1 through 3 continuously, running the compile and parity gates after each sub-step."*
+
+---
+
+## Long-Running Non-Interactive CLI Automation (`mstack-automation`)
+
+### Why Skills Normally Stop After 1 Migration Step
+In standard interactive chat sessions, AI agents often stop after finishing **1 migration step** because of:
+1. **Single-Turn Checkpoint Bias**: Skills pause to report results or ask for human confirmation between phases.
+2. **Context Window Saturation**: Running 4 phases × 4 sub-steps across multiple features fills up a single conversation's context window with build logs and diffs, causing the model to wrap up early.
+
+`mstack` solves this with **`mstack-automation`** and `./mobile-migration-tools/scripts/automate-plan.sh` (`npx mobile-migration-tools automate`). It persists a multi-step queue in `.mstack/migration-plan.json` and loops through every `PENDING` step—invoking **any CLI tool in non-interactive headless mode** with a **fresh context window per step** and automatic self-healing retries until 100% of steps pass `compile-gate.sh`.
+
+```mermaid
+flowchart LR
+    Queue[".mstack/migration-plan.json\n(Step Queue)"] --> Runner["automate-plan.sh\n(While PENDING steps exist)"]
+    Runner --> CLI["Non-Interactive CLI Agent\n(agy / claude / codex / gemini / aider / custom)"]
+    CLI --> Gate["compile-gate.sh\n(Verify Build & Parity)"]
+    Gate -- "PASS" --> Mark["Mark Step COMPLETED\n& Immediately Start Next Step"]
+    Gate -- "FAIL" --> Retry["Feed Error Tail to Next Retry\n(Up to --max-retries)"]
+```
+
+### Run Unattended with Any CLI Tool
+
+```bash
+# 1. Antigravity CLI (agy) in non-interactive mode:
+npx mobile-migration-tools automate \
+  --features "Login,PaymentConfirmation,TransferReceipt" \
+  --cli agy
+
+# 2. Claude Code CLI in non-interactive mode:
+npx mobile-migration-tools automate \
+  --features "Login,PaymentConfirmation,TransferReceipt" \
+  --cli claude
+
+# 3. OpenAI Codex CLI in full-auto mode:
+npx mobile-migration-tools automate \
+  --features "Login,PaymentConfirmation,TransferReceipt" \
+  --cli codex
+
+# 4. Gemini CLI in non-interactive mode:
+npx mobile-migration-tools automate \
+  --features "Login,PaymentConfirmation,TransferReceipt" \
+  --cli gemini
+
+# 5. Aider CLI in non-interactive mode:
+npx mobile-migration-tools automate \
+  --features "Login,PaymentConfirmation,TransferReceipt" \
+  --cli aider
+
+# 6. Any Custom CLI Command Template ({PROMPT_FILE} or {PROMPT}):
+npx mobile-migration-tools automate \
+  --features "PaymentConfirmation" \
+  --cli-cmd 'my-custom-cli run --headless --prompt-file {PROMPT_FILE}'
+```
+
+### Check Progress or Resume an Interrupted Run
+
+Because `.mstack/migration-plan.json` is updated after every step, you can stop and resume at any time:
+
+```bash
+# Initialize the plan queue without running yet:
+npx mobile-migration-tools automate --features "Login,PaymentConfirmation" --init-only
+
+# View live/current status of all steps in the migration plan:
+npx mobile-migration-tools automate --status
+
+# Reset any FAILED steps and resume where it left off:
+npx mobile-migration-tools automate --reset-failed --cli agy
+```
 
 ---
 
@@ -254,5 +325,6 @@ When you use `mstack` in a project, it maintains a clean, auditable `.mstack/` d
 | Path | Purpose |
 | :--- | :--- |
 | `.mstack/target-profile.json` | Stores your project's detected legacy baseline, user-selected target architecture, and fast compile/test commands. |
+| `.mstack/migration-plan.json` | Persistent state-machine queue (`PENDING` -> `IN_PROGRESS` -> `COMPLETED` / `FAILED`) used by `automate-plan.sh` and `mstack-automation` so multi-step runs never stop after 1 step. |
 | `.mstack/audit.tsv` | Append-only TSV log tracking every atomic step, which `mstack` principles were applied, the exact command executed, log/snapshot evidence paths, and pass/fail status. |
-| `.mstack/logs/` | Timestamped compiler and test output logs generated by `compile-gate.sh` (`compile_<step>_<timestamp>.log`). |
+| `.mstack/logs/` | Timestamped compiler, test, and headless CLI agent output logs (`compile_<step>_<timestamp>.log`, `agent_<step>_<timestamp>.log`). |

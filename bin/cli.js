@@ -20,6 +20,7 @@ Usage:
 
 Commands:
   init, install             Install mobile-migration-tools (skills, scripts, rules) into the workspace (default)
+  automate <args...>        Run long-running non-interactive CLI automation across all steps in .mstack/migration-plan.json (automate-plan.sh)
   detect [dir]              Run the workspace baseline detector (detect-project.sh)
   compile-gate <args...>    Run the Universal Always-Compile gate (compile-gate.sh)
   log-evidence <args...>    Append an evidence row to .mstack/audit.tsv (log-evidence.sh)
@@ -214,6 +215,11 @@ function main() {
 
   if (first === "detect") {
     runShellScript("detect-project.sh", args.slice(1));
+    return;
+  }
+
+  if (first === "automate") {
+    runShellScript("automate-plan.sh", args.slice(1));
     return;
   }
 

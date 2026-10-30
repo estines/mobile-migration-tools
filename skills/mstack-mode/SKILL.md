@@ -15,7 +15,8 @@ flowchart TD
     CheckProfile -- "Yes" --> Classify["Classify Task & Load Playbook"]
     Setup --> Classify
 
-    Classify -->|"Migrate Legacy Feature"| P_Mig["4-Step Decoupled Migration:\n1. mstack-step1-logic-storage\n2. mstack-step2-ui-parity\n3. mstack-step3-navigation-adaptive\n4. mstack-step4-greenfield-cutover"]
+    Classify -->|"Migrate Legacy Feature (Interactive or Continuous)"| P_Mig["4-Step Decoupled Migration:\n1. mstack-step1-logic-storage\n2. mstack-step2-ui-parity\n3. mstack-step3-navigation-adaptive\n4. mstack-step4-greenfield-cutover"]
+    Classify -->|"Long-Running / Non-Interactive CLI Automation"| P_Auto["Run Skill: mstack-automation\n(automate-plan.sh + .mstack/migration-plan.json\nZero human prompts until all steps COMPLETED)"]
     Classify -->|"Build New Parallel Feature"| P_New["Run Skill: mstack-step4-greenfield-cutover\n(Greenfield on Target Stack + Synced Bridge)"]
     Classify -->|"Audit / Verify Parity"| P_Ver["Run All 4 Verification Gates\n& Audit .mstack/audit.tsv"]
 ```
@@ -24,11 +25,12 @@ flowchart TD
 
 ## Mandatory Execution Protocol
 
-### 1. Check Target Profile First (`mstack-setup`)
+### 1. Check Target Profile First (`mstack-setup` vs. `mstack-automation`)
 - Check if `.mstack/target-profile.json` exists in the workspace root.
-- If it is missing, **stop immediately** and execute [`mstack-setup`](../mstack-setup/SKILL.md) to detect the current project and ask the user to select their target architecture and stack via `ask_question`.
+- **Interactive Mode (default)**: If `.mstack/target-profile.json` is missing, execute [`mstack-setup`](../mstack-setup/SKILL.md) to detect the current project and ask the user to select their target architecture and stack via `ask_question`.
+- **Non-Interactive / Automation Mode**: If the user requested unattended/automation mode (or passed `--cli` / `mstack-automation`), **never pause to ask questions**. Use [`mstack-automation`](../mstack-automation/SKILL.md) and `./mobile-migration-tools/scripts/automate-plan.sh` to auto-initialize `.mstack/target-profile.json` and `.mstack/migration-plan.json`, and execute all queued steps continuously without stopping after 1 step.
 
-### 2. Copy Playbook Steps into Your Active Checklist
+### 2. Copy Playbook Steps into Your Active Checklist (And Never Stop After 1 Step in Automation Mode)
 Never improvise a migration sequence. Match the user's request to the exact playbook below:
 
 - **Migrating an Existing Feature / Screen (End-to-End or Phased)**:
