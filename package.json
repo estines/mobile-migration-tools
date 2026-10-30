@@ -1,0 +1,45 @@
+{
+  "name": "mobile-migration-tools",
+  "version": "1.0.0",
+  "description": "Self-contained skillset and workflow engine (mstack) for migrating legacy mobile apps with 100% visual, behavioral, navigation, and business-logic parity.",
+  "bin": {
+    "mobile-migration-tools": "./bin/cli.js",
+    "mstack": "./bin/cli.js"
+  },
+  "files": [
+    "bin/",
+    "skills/",
+    "scripts/",
+    "rules/",
+    "plugin.json",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node ./bin/cli.js --help && ./scripts/detect-project.sh"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/estines/mobile-migration-tools.git"
+  },
+  "keywords": [
+    "mobile-migration",
+    "mstack",
+    "pstack",
+    "android",
+    "ios",
+    "kotlin-multiplatform",
+    "kmp",
+    "jetpack-compose",
+    "swiftui",
+    "agent-skills",
+    "antigravity",
+    "cursor",
+    "claude"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
+
