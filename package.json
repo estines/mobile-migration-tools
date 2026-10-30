@@ -15,7 +15,7 @@
     "README.md"
   ],
   "scripts": {
-    "test": "node ./bin/cli.js --help && ./scripts/detect-project.sh"
+    "test": "node ./bin/cli.js --help && ./scripts/detect-project.sh && node --test test/**/*.test.js"
   },
   "repository": {
     "type": "git",
